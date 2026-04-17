@@ -189,6 +189,27 @@ def _strip_ansi(s: str) -> str:
     return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", s)
 
 
+def _dedupe_response(text: str) -> str:
+    s = text.strip()
+    n = len(s)
+    if n < 60:
+        return s
+    # Exact half duplication (same text printed twice)
+    for split in range(max(20, n // 2 - 3), min(n - 20, n // 2 + 4)):
+        a = s[:split].strip()
+        b = s[split:].strip()
+        if a and a == b:
+            return a
+    # Any long prefix that reappears later verbatim
+    for size in range(min(n - 20, 400), 40, -1):
+        chunk = s[:size].strip()
+        if not chunk:
+            continue
+        if s.count(chunk) >= 2:
+            return chunk
+    return s
+
+
 def _clean_hermes_output(raw: str) -> str:
     text = _strip_ansi(raw)
     out_lines: list[str] = []
@@ -214,6 +235,7 @@ def _clean_hermes_output(raw: str) -> str:
         out_lines.append(ln)
     result = "\n".join(out_lines).strip()
     result = re.sub(r"\n{3,}", "\n\n", result)
+    result = _dedupe_response(result)
     return result or text.strip()
 
 
