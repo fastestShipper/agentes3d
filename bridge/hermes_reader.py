@@ -84,15 +84,48 @@ def _role_guess(name: str) -> str:
     return mapping.get(name.lower(), "Agente")
 
 
+IGNORED_DIRS = {"archived", "backups", ".git", "__pycache__"}
+
+
+async def _list_hermes_units() -> list[str]:
+    rc, out = await _run(
+        ["systemctl", "list-units", "--type=service", "--all", "--no-legend", "--plain"]
+    )
+    if rc != 0:
+        return []
+    units: list[str] = []
+    for line in out.splitlines():
+        parts = line.strip().split()
+        if not parts:
+            continue
+        unit = parts[0]
+        if unit.startswith(SYSTEMD_PREFIX) and unit.endswith(".service"):
+            units.append(unit)
+    return units
+
+
+async def _dir_to_unit_map() -> dict[str, str]:
+    units = await _list_hermes_units()
+    mapping: dict[str, str] = {}
+    for unit in units:
+        wd = await _systemctl_show(unit, "WorkingDirectory")
+        if wd:
+            mapping[Path(wd).name] = unit
+    return mapping
+
+
 async def list_hermes_agents() -> list[HermesAgent]:
     agents: list[HermesAgent] = []
     if not AGENTES_ROOT.exists():
         return agents
+    unit_by_dir = await _dir_to_unit_map()
     for home in sorted(AGENTES_ROOT.iterdir()):
         if not home.is_dir():
             continue
         name = home.name
-        unit = f"{SYSTEMD_PREFIX}{name}.service"
+        if name in IGNORED_DIRS or name.startswith("."):
+            continue
+        unit = unit_by_dir.get(name, f"{SYSTEMD_PREFIX}{name}.service")
         status_task = _systemctl_status(unit)
         enter_task = _systemctl_show(unit, "ActiveEnterTimestamp")
         status, enter_ts = await asyncio.gather(status_task, enter_task)
