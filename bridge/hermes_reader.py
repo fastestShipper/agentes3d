@@ -162,7 +162,27 @@ HERMES_BIN = os.environ.get(
 )
 HERMES_MODULE = os.environ.get("HERMES_MODULE", "hermes_cli.main")
 HERMES_CHAT_TIMEOUT = int(os.environ.get("HERMES_CHAT_TIMEOUT", "180"))
-HERMES_SESSION_PREFIX = "agentes3d"
+AGENTES3D_STATE = Path(os.environ.get("AGENTES3D_DATA", "/root/.agentes3d"))
+
+
+def _session_file(agent_id: str) -> Path:
+    AGENTES3D_STATE.mkdir(parents=True, exist_ok=True)
+    return AGENTES3D_STATE / f"session-{agent_id}.txt"
+
+
+def _load_session(agent_id: str) -> Optional[str]:
+    p = _session_file(agent_id)
+    if not p.exists():
+        return None
+    val = p.read_text(encoding="utf-8").strip()
+    return val or None
+
+
+def _save_session(agent_id: str, session_id: str) -> None:
+    _session_file(agent_id).write_text(session_id, encoding="utf-8")
+
+
+_SESSION_ID_RE = re.compile(r"session_id:\s*([A-Za-z0-9_\-]+)")
 
 
 def _strip_ansi(s: str) -> str:
@@ -194,19 +214,15 @@ async def send_message_to_hermes(agent_id: str, text: str) -> str:
     home = AGENTES_ROOT / agent_id
     if not home.exists():
         raise FileNotFoundError(f"Agente {agent_id} no existe en {AGENTES_ROOT}")
-    session_name = f"{HERMES_SESSION_PREFIX}-{agent_id}"
     env = os.environ.copy()
     env["HERMES_HOME"] = str(home)
     env["NO_COLOR"] = "1"
     env["TERM"] = "dumb"
 
-    cmd = [
-        HERMES_BIN, "-m", HERMES_MODULE,
-        "chat",
-        "-q", text,
-        "-Q",
-        "-c", session_name,
-    ]
+    existing = _load_session(agent_id)
+    cmd = [HERMES_BIN, "-m", HERMES_MODULE, "chat", "-q", text, "-Q"]
+    if existing:
+        cmd.extend(["--resume", existing])
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -232,5 +248,9 @@ async def send_message_to_hermes(agent_id: str, text: str) -> str:
     if proc.returncode and proc.returncode != 0 and not stdout.strip():
         detail = (stderr or stdout).strip().splitlines()[-5:]
         raise RuntimeError("Hermes falló: " + " | ".join(detail))
+
+    m = _SESSION_ID_RE.search(stdout)
+    if m:
+        _save_session(agent_id, m.group(1))
 
     return _clean_hermes_output(stdout) or "(respuesta vacía)"
