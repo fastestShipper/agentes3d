@@ -85,7 +85,7 @@ def _role_guess(name: str) -> str:
     return mapping.get(name.lower(), "Agente")
 
 
-IGNORED_DIRS = {"archived", "backups", ".git", "__pycache__"}
+IGNORED_DIRS = {"archived", "backups", ".git", "__pycache__", "shared", "agente0"}
 
 
 async def _list_hermes_units() -> list[str]:
@@ -117,19 +117,40 @@ async def _dir_to_unit_map() -> dict[str, str]:
 
 async def list_hermes_agents() -> list[HermesAgent]:
     agents: list[HermesAgent] = []
+    unit_by_dir = await _dir_to_unit_map()
+
+    # Virtual Hermes agent (base, no HERMES_HOME override)
+    hermes_home = Path("/root/.hermes")
+    hermes_cfg = _read_config(hermes_home) if hermes_home.exists() else {}
+    agents.append(
+        HermesAgent(
+            id="hermes",
+            name="Hermes",
+            role="Orquestador base",
+            status="active",
+            model=hermes_cfg.get("model"),
+            home_dir=str(hermes_home),
+            systemd_unit="",
+            last_activity=None,
+        )
+    )
+
     if not AGENTES_ROOT.exists():
         return agents
-    unit_by_dir = await _dir_to_unit_map()
     for home in sorted(AGENTES_ROOT.iterdir()):
         if not home.is_dir():
             continue
         name = home.name
         if name in IGNORED_DIRS or name.startswith("."):
             continue
-        unit = unit_by_dir.get(name, f"{SYSTEMD_PREFIX}{name}.service")
+        unit = unit_by_dir.get(name)
+        if not unit:
+            continue  # solo agents con systemd unit real
         status_task = _systemctl_status(unit)
         enter_task = _systemctl_show(unit, "ActiveEnterTimestamp")
         status, enter_ts = await asyncio.gather(status_task, enter_task)
+        if status != "active":
+            continue  # solo los que están corriendo
         cfg = _read_config(home)
         agents.append(
             HermesAgent(
@@ -239,17 +260,37 @@ def _clean_hermes_output(raw: str) -> str:
     return result or text.strip()
 
 
+CONTEXT_NOTE = (
+    "[Contexto del canal agentes3d] Estás en una oficina 3D dentro de un "
+    "navegador web, no en Telegram ni Discord. El usuario te ve como un "
+    "personaje animado moviéndose por la oficina. Responde en texto plano "
+    "legible (poco markdown). No mandes enlaces a bots de Telegram. "
+    "Si estás trabajando activamente, describe que estás en tu estación; "
+    "si estás inactivo, estás paseando o descansando por la oficina. "
+    "Primera vez que te escriban por este canal, salúdalo brevemente "
+    "reconociendo el cambio de entorno."
+)
+
+
 async def send_message_to_hermes(agent_id: str, text: str) -> str:
-    home = AGENTES_ROOT / agent_id
-    if not home.exists():
-        raise FileNotFoundError(f"Agente {agent_id} no existe en {AGENTES_ROOT}")
+    if agent_id == "hermes":
+        home = Path("/root/.hermes")
+        use_env_home = False
+    else:
+        home = AGENTES_ROOT / agent_id
+        if not home.exists():
+            raise FileNotFoundError(f"Agente {agent_id} no existe en {AGENTES_ROOT}")
+        use_env_home = True
+
     env = os.environ.copy()
-    env["HERMES_HOME"] = str(home)
+    if use_env_home:
+        env["HERMES_HOME"] = str(home)
     env["NO_COLOR"] = "1"
     env["TERM"] = "dumb"
 
     existing = _load_session(agent_id)
-    cmd = [HERMES_BIN, "-m", HERMES_MODULE, "chat", "-q", text, "-Q"]
+    wrapped = text if existing else f"{CONTEXT_NOTE}\n\n---\n\n{text}"
+    cmd = [HERMES_BIN, "-m", HERMES_MODULE, "chat", "-q", wrapped, "-Q"]
     if existing:
         cmd.extend(["--resume", existing])
 
