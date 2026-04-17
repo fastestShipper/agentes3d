@@ -191,23 +191,30 @@ def _strip_ansi(s: str) -> str:
 
 def _clean_hermes_output(raw: str) -> str:
     text = _strip_ansi(raw)
-    lines: list[str] = []
-    skip_prefixes = ("╭", "╰", "│", "─", "⚕")
+    out_lines: list[str] = []
+    box_prefixes = ("╭", "╰", "│", "─", "⚕")
+    skip_patterns = (
+        "↻ Resumed session",
+        "session_id:",
+        "  ┊ ",
+    )
     for ln in text.splitlines():
         stripped = ln.strip()
         if not stripped:
-            lines.append(ln)
+            out_lines.append(ln)
             continue
-        if stripped.startswith(skip_prefixes):
+        if any(stripped.startswith(p) for p in skip_patterns):
+            continue
+        if stripped.startswith(box_prefixes):
             cleaned = re.sub(r"^[│|]\s?", "", stripped).strip()
             cleaned = re.sub(r"^[╭╰─]+", "", cleaned).strip()
             if cleaned and not cleaned.startswith("⚕"):
-                lines.append(cleaned)
+                out_lines.append(cleaned)
             continue
-        if stripped.startswith("session_id:"):
-            continue
-        lines.append(ln)
-    return "\n".join(lines).strip() or text.strip()
+        out_lines.append(ln)
+    result = "\n".join(out_lines).strip()
+    result = re.sub(r"\n{3,}", "\n\n", result)
+    return result or text.strip()
 
 
 async def send_message_to_hermes(agent_id: str, text: str) -> str:
