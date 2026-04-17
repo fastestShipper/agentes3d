@@ -9,6 +9,7 @@ Fuentes:
 from __future__ import annotations
 import asyncio
 import os
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -193,8 +194,6 @@ async def send_message_to_hermes(agent_id: str, text: str) -> str:
     home = AGENTES_ROOT / agent_id
     if not home.exists():
         raise FileNotFoundError(f"Agente {agent_id} no existe en {AGENTES_ROOT}")
-    import re as _re  # noqa
-
     session_name = f"{HERMES_SESSION_PREFIX}-{agent_id}"
     env = os.environ.copy()
     env["HERMES_HOME"] = str(home)
