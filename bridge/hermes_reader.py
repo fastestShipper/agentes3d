@@ -156,20 +156,82 @@ def _display_name(slug: str) -> str:
 # pero el puente real requiere config adicional.
 # ---------------------------------------------------------------------------
 
+HERMES_BIN = os.environ.get(
+    "HERMES_BIN", "/root/.hermes/hermes-agent/venv/bin/python"
+)
+HERMES_MODULE = os.environ.get("HERMES_MODULE", "hermes_cli.main")
+HERMES_CHAT_TIMEOUT = int(os.environ.get("HERMES_CHAT_TIMEOUT", "180"))
+HERMES_SESSION_PREFIX = "agentes3d"
+
+
+def _strip_ansi(s: str) -> str:
+    return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", s)
+
+
+def _clean_hermes_output(raw: str) -> str:
+    text = _strip_ansi(raw)
+    lines: list[str] = []
+    skip_prefixes = ("╭", "╰", "│", "─", "⚕")
+    for ln in text.splitlines():
+        stripped = ln.strip()
+        if not stripped:
+            lines.append(ln)
+            continue
+        if stripped.startswith(skip_prefixes):
+            cleaned = re.sub(r"^[│|]\s?", "", stripped).strip()
+            cleaned = re.sub(r"^[╭╰─]+", "", cleaned).strip()
+            if cleaned and not cleaned.startswith("⚕"):
+                lines.append(cleaned)
+            continue
+        if stripped.startswith("session_id:"):
+            continue
+        lines.append(ln)
+    return "\n".join(lines).strip() or text.strip()
+
+
 async def send_message_to_hermes(agent_id: str, text: str) -> str:
     home = AGENTES_ROOT / agent_id
     if not home.exists():
         raise FileNotFoundError(f"Agente {agent_id} no existe en {AGENTES_ROOT}")
-    # Puente mínimo: registrar el mensaje en inbox.jsonl del agente.
-    # Hermes real se engancha después leyendo este inbox o vía webhook/CLI.
-    inbox = home / "agentes3d-inbox.jsonl"
-    line = f'{{"ts":{int(time.time())},"from":"agentes3d","text":{text!r}}}\n'
-    try:
-        with open(inbox, "a", encoding="utf-8") as f:
-            f.write(line)
-    except Exception as e:
-        raise RuntimeError(f"No pude escribir inbox: {e}") from e
-    return (
-        f"Mensaje entregado al inbox de {agent_id}.\n"
-        f"(Puente Hermes CLI pendiente de conectar. El inbox queda en {inbox}.)"
+    import re as _re  # noqa
+
+    session_name = f"{HERMES_SESSION_PREFIX}-{agent_id}"
+    env = os.environ.copy()
+    env["HERMES_HOME"] = str(home)
+    env["NO_COLOR"] = "1"
+    env["TERM"] = "dumb"
+
+    cmd = [
+        HERMES_BIN, "-m", HERMES_MODULE,
+        "chat",
+        "-q", text,
+        "-Q",
+        "-c", session_name,
+    ]
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        cwd=str(home),
+        env=env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
+    try:
+        out, err = await asyncio.wait_for(
+            proc.communicate(), timeout=HERMES_CHAT_TIMEOUT
+        )
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        raise RuntimeError(f"Hermes tardó más de {HERMES_CHAT_TIMEOUT}s en responder")
+
+    stdout = out.decode("utf-8", "replace")
+    stderr = err.decode("utf-8", "replace")
+
+    if proc.returncode and proc.returncode != 0 and not stdout.strip():
+        detail = (stderr or stdout).strip().splitlines()[-5:]
+        raise RuntimeError("Hermes falló: " + " | ".join(detail))
+
+    return _clean_hermes_output(stdout) or "(respuesta vacía)"
