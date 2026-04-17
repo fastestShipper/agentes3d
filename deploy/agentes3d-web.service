@@ -1,0 +1,19 @@
+[Unit]
+Description=agentes3d web (Next.js prod)
+After=network.target agentes3d-bridge.service
+Requires=agentes3d-bridge.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/agentes3d/web
+Environment=HOST=127.0.0.1
+Environment=PORT=3100
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm run start
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/var/log/agentes3d-web.log
+StandardError=append:/var/log/agentes3d-web.log
+
+[Install]
+WantedBy=multi-user.target
