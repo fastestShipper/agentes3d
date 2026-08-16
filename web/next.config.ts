@@ -2,7 +2,6 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: [
-    "agente.gambolsoft.com",
     "localhost",
     "127.0.0.1",
   ],

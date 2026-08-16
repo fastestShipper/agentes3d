@@ -1,7 +1,7 @@
 """FastAPI bridge para agentes3d.
 
 Endpoints:
-  GET  /agents                     listar agentes (estado real desde systemd + /root/agentes/)
+  GET  /agents                     listar agentes (estado real desde systemd + directorio de agentes)
   GET  /agents/{id}                 detalle
   GET  /agents/{id}/messages        historial (archivo local por agente)
   POST /agents/{id}/chat            envía mensaje (guarda historial + stub respuesta)
@@ -32,10 +32,12 @@ from hermes_reader import (
     send_message_to_hermes,
 )
 
-AGENTES3D_DATA = Path(os.environ.get("AGENTES3D_DATA", "/root/.agentes3d"))
+AGENTES3D_DATA = Path(os.path.expanduser(os.environ.get("AGENTES3D_DATA", "~/.agentes3d")))
 AGENTES3D_DATA.mkdir(parents=True, exist_ok=True)
 
-TEMPLATE_DIR = Path(os.environ.get("AGENTES3D_TEMPLATE", "/root/agentes/agente0"))
+TEMPLATE_DIR = Path(os.path.expanduser(os.environ.get("AGENTES3D_TEMPLATE", "~/agentes/agente0")))
+
+HERMES_EXEC = os.environ.get("HERMES_EXEC", "hermes gateway run --replace")
 
 app = FastAPI(title="agentes3d-bridge", version="0.1.0")
 app.add_middleware(
@@ -239,7 +241,7 @@ Type=simple
 User=root
 Environment=HERMES_HOME={home}
 WorkingDirectory={home}
-ExecStart=/root/.hermes/hermes-agent/venv/bin/python -m hermes_cli.main gateway run --replace
+ExecStart={HERMES_EXEC}
 Restart=always
 RestartSec=5
 

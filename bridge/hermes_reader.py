@@ -1,8 +1,8 @@
-"""Lee estado real de los agentes Hermes del VPS.
+"""Lee estado real de los agentes del backend (Hermes u otro).
 
 Fuentes:
 - `systemctl is-active hermes-<name>` → status
-- `/root/agentes/<name>/` → home dir
+- directorio de agentes (AGENTES_ROOT) → home dir
 - `systemctl show hermes-<name> -p ActiveEnterTimestamp` → last activity
 - `.hermes/config.yaml` del agente → modelo configurado
 """
@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-AGENTES_ROOT = Path(os.environ.get("AGENTES_ROOT", "/root/agentes"))
+AGENTES_ROOT = Path(os.path.expanduser(os.environ.get("AGENTES_ROOT", "~/agentes")))
 SYSTEMD_PREFIX = os.environ.get("HERMES_UNIT_PREFIX", "hermes-")
 
 
@@ -120,7 +120,7 @@ async def list_hermes_agents() -> list[HermesAgent]:
     unit_by_dir = await _dir_to_unit_map()
 
     # Virtual Hermes agent (base, no HERMES_HOME override)
-    hermes_home = Path("/root/.hermes")
+    hermes_home = Path(os.path.expanduser(os.environ.get("HERMES_HOME", "~/.hermes")))
     hermes_cfg = _read_config(hermes_home) if hermes_home.exists() else {}
     agents.append(
         HermesAgent(
@@ -179,11 +179,11 @@ def _display_name(slug: str) -> str:
 # ---------------------------------------------------------------------------
 
 HERMES_BIN = os.environ.get(
-    "HERMES_BIN", "/root/.hermes/hermes-agent/venv/bin/python"
+    "HERMES_BIN", "python"
 )
 HERMES_MODULE = os.environ.get("HERMES_MODULE", "hermes_cli.main")
 HERMES_CHAT_TIMEOUT = int(os.environ.get("HERMES_CHAT_TIMEOUT", "180"))
-AGENTES3D_STATE = Path(os.environ.get("AGENTES3D_DATA", "/root/.agentes3d"))
+AGENTES3D_STATE = Path(os.path.expanduser(os.environ.get("AGENTES3D_DATA", "~/.agentes3d")))
 
 
 def _session_file(agent_id: str) -> Path:
@@ -274,7 +274,7 @@ CONTEXT_NOTE = (
 
 async def send_message_to_hermes(agent_id: str, text: str) -> str:
     if agent_id == "hermes":
-        home = Path("/root/.hermes")
+        home = Path(os.path.expanduser(os.environ.get("HERMES_HOME", "~/.hermes")))
         use_env_home = False
     else:
         home = AGENTES_ROOT / agent_id
